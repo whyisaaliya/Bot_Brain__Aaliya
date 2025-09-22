@@ -1,0 +1,196 @@
+import math
+from queue import PriorityQueue
+import tkinter as tk
+from tkinter import ttk, messagebox
+import matplotlib
+matplotlib.use('TkAgg')
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
+# --- Campus locations ---
+locations = {
+    "Academic Block 1": (0, 0),
+    "Academic Block 2": (2, 1),
+    "Academic Block 3": (4, 0),
+    "Hostel Block 1": (1, -2),
+    "Hostel Block 2": (3, -2),
+    "Faculty Residential": (5, 1),
+    "Main Gate": (0, 3),
+    "Inner Gate": (2, 3),
+    "Research Labs": (4, 3),
+    "Food Court": (1, 1),
+    "Cricket Pitch": (3, -1),
+    "Football Ground": (5, -1),
+}
+
+graph = {
+    "Academic Block 1": {"Academic Block 2": 2, "Hostel Block 1": 3, "Main Gate": 4},
+    "Academic Block 2": {"Academic Block 1": 2, "Academic Block 3": 2, "Inner Gate": 2, "Food Court": 1},
+    "Academic Block 3": {"Academic Block 2": 2, "Faculty Residential": 3, "Research Labs": 2},
+    "Hostel Block 1": {"Academic Block 1": 3, "Hostel Block 2": 2, "Cricket Pitch": 3},
+    "Hostel Block 2": {"Hostel Block 1": 2, "Football Ground": 2, "Faculty Residential": 3},
+    "Faculty Residential": {"Academic Block 3": 3, "Hostel Block 2": 3, "Research Labs": 1},
+    "Main Gate": {"Academic Block 1": 4, "Inner Gate": 2},
+    "Inner Gate": {"Main Gate": 2, "Academic Block 2": 2, "Research Labs": 2},
+    "Research Labs": {"Inner Gate": 2, "Academic Block 3": 2, "Faculty Residential": 1},
+    "Food Court": {"Academic Block 2": 1, "Cricket Pitch": 2},
+    "Cricket Pitch": {"Food Court": 2, "Hostel Block 1": 3, "Football Ground": 2},
+    "Football Ground": {"Cricket Pitch": 2, "Hostel Block 2": 2},
+}
+
+# --- Heuristic ---
+def euclidean_heuristic(node, goal):
+    x1, y1 = locations[node]
+    x2, y2 = locations[goal]
+    return math.hypot(x2 - x1, y2 - y1)
+
+# --- A* Search ---
+def a_star_search_with_steps(start, goal):
+    open_set = PriorityQueue()
+    open_set.put((0, start))
+    came_from = {}
+    g_score = {node: float('inf') for node in locations}
+    g_score[start] = 0
+    f_score = {node: float('inf') for node in locations}
+    f_score[start] = euclidean_heuristic(start, goal)
+    explored_nodes = set()
+    steps = []
+
+    while not open_set.empty():
+        current = open_set.get()[1]
+        explored_nodes.add(current)
+        steps.append(f"Exploring node: {current}")
+
+        if current == goal:
+            path = []
+            while current in came_from:
+                path.append(current)
+                current = came_from[current]
+            path.append(start)
+            steps.append("Goal reached! Path constructed.")
+            return path[::-1], g_score[goal], len(explored_nodes), steps
+
+        for neighbor in graph.get(current, {}):
+            tentative_g = g_score[current] + graph[current][neighbor]
+            steps.append(f"Checking neighbor: {neighbor}, tentative_g: {tentative_g:.2f}")
+
+            if tentative_g < g_score[neighbor]:
+                came_from[neighbor] = current
+                g_score[neighbor] = tentative_g
+                f_score[neighbor] = tentative_g + euclidean_heuristic(neighbor, goal)
+                open_set.put((f_score[neighbor], neighbor))
+                steps.append(f"Updated {neighbor}: g={g_score[neighbor]:.2f}, f={f_score[neighbor]:.2f}")
+
+    steps.append("No path found.")
+    return None, float('inf'), len(explored_nodes), steps
+
+# --- Map drawing ---
+def draw_map(selected_path=None):
+    fig, ax = plt.subplots(figsize=(8, 8))  # bigger map
+    # Draw all connections
+    for loc, neighbors in graph.items():
+        for nbr in neighbors:
+            x1, y1 = locations[loc]
+            x2, y2 = locations[nbr]
+            ax.plot([x1, x2], [y1, y2], color="#bbbbbb", linewidth=2, zorder=1)
+
+    # Highlight selected path
+    if selected_path and len(selected_path) > 1:
+        for i in range(len(selected_path)-1):
+            a, b = selected_path[i], selected_path[i+1]
+            x1, y1 = locations[a]
+            x2, y2 = locations[b]
+            ax.plot([x1, x2], [y1, y2], color="red", linewidth=3, zorder=2)
+
+    # Plot points + labels
+    for loc, (x, y) in locations.items():
+        ax.scatter(x, y, s=120, c='blue', zorder=3)
+        ax.text(x+0.2, y+0.2, loc, fontsize=10, fontweight='bold', zorder=4)
+
+    ax.set_title("Chanakya University Campus Map")
+    ax.set_aspect('equal')
+    ax.axis('off')
+    return fig
+
+def update_map(selected_path):
+    global canvas
+    fig = draw_map(selected_path)
+    if canvas:
+        canvas.get_tk_widget().pack_forget()
+    canvas = FigureCanvasTkAgg(fig, master=map_frame)
+    canvas.draw()
+    canvas.get_tk_widget().pack(fill="both", expand=True)
+
+# --- Path finding action ---
+def find_path():
+    start = start_var.get()
+    goal = goal_var.get()
+    if start not in locations or goal not in locations:
+        messagebox.showerror("Error", "Invalid location selected!")
+        return
+
+    path, distance, nodes_explored, steps = a_star_search_with_steps(start, goal)
+
+    if path:
+        result_text.set(
+            f"Recommended Path:\n{' -> '.join(path)}\n\n"
+            f"Total Distance: {distance:.2f} units\n"
+            f"Nodes Explored: {nodes_explored}"
+        )
+        steps_display.delete(1.0, tk.END)
+        steps_display.insert(tk.END, "\n".join(steps))
+        update_map(path)
+    else:
+        result_text.set("No path found between the selected locations.")
+        steps_display.delete(1.0, tk.END)
+        update_map([])
+
+# --- GUI ---
+canvas = None
+root = tk.Tk()
+root.title("Campus Navigator - BotBrain (Map Visualization)")
+root.geometry("1200x800")  # bigger window
+
+# Input section
+input_frame = tk.Frame(root)
+input_frame.pack(pady=10)
+
+tk.Label(input_frame, text="Select Current Location:").grid(row=0, column=0, padx=5)
+start_var = tk.StringVar()
+start_dropdown = ttk.Combobox(input_frame, textvariable=start_var, width=40, state='readonly')
+start_dropdown['values'] = list(locations.keys())
+start_dropdown.grid(row=0, column=1, padx=5)
+
+tk.Label(input_frame, text="Select Destination:").grid(row=1, column=0, padx=5)
+goal_var = tk.StringVar()
+goal_dropdown = ttk.Combobox(input_frame, textvariable=goal_var, width=40, state='readonly')
+goal_dropdown['values'] = list(locations.keys())
+goal_dropdown.grid(row=1, column=1, padx=5)
+
+tk.Button(input_frame, text="Find Best Path", command=find_path).grid(row=2, columnspan=2, pady=10)
+
+# Main layout: map (left) + results/steps (right)
+main_frame = tk.Frame(root)
+main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+# Left frame = Map
+map_frame = tk.Frame(main_frame)
+map_frame.pack(side="left", fill="both", expand=True)
+
+tk.Label(map_frame, text="Campus Map Visualization:").pack()
+canvas = FigureCanvasTkAgg(draw_map(), master=map_frame)
+canvas.draw()
+canvas.get_tk_widget().pack(fill="both", expand=True)
+
+# Right frame = Results + Steps
+right_frame = tk.Frame(main_frame)
+right_frame.pack(side="right", fill="both", expand=True)
+
+result_text = tk.StringVar()
+tk.Label(right_frame, textvariable=result_text, wraplength=400, justify="left").pack(pady=10)
+
+tk.Label(right_frame, text="Step-by-Step Search Process:").pack()
+steps_display = tk.Text(right_frame, wrap=tk.WORD, height=30, width=50)
+steps_display.pack(fill="both", expand=True)
+
+root.mainloop()
